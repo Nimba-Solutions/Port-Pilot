@@ -1,0 +1,727 @@
+<!--
+  @name         Port Pilot
+  @license      BSL 1.1 — See LICENSE.md
+  @description  Dashboard UI — visual localhost port manager for Windows.
+  @author       Cloud Nimbus LLC
+-->
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Port Pilot</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      font-family: 'Segoe UI', system-ui, sans-serif;
+      background: #0f1923;
+      color: #e0e0e0;
+      min-height: 100vh;
+      padding: 16px 20px;
+      user-select: none;
+    }
+
+    /* Header */
+    .header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 12px;
+    }
+    .header-left { display: flex; align-items: center; gap: 12px; }
+    .header h1 { font-size: 20px; font-weight: 600; color: #fff; }
+    .port-count {
+      background: #1e3a5f;
+      color: #7eb8f0;
+      padding: 2px 10px;
+      border-radius: 12px;
+      font-size: 13px;
+      font-weight: 600;
+    }
+    .header-right { display: flex; align-items: center; gap: 8px; }
+
+    /* Buttons */
+    .btn {
+      padding: 6px 14px;
+      border: none;
+      border-radius: 6px;
+      cursor: pointer;
+      font-size: 13px;
+      font-weight: 500;
+      transition: all 0.15s;
+    }
+    .btn-primary { background: #2563eb; color: #fff; }
+    .btn-primary:hover { background: #3b82f6; }
+    .btn-danger { background: #7f1d1d; color: #fca5a5; }
+    .btn-danger:hover { background: #991b1b; }
+    .btn-ghost { background: transparent; color: #9ca3af; border: 1px solid #374151; }
+    .btn-ghost:hover { background: #1f2937; color: #fff; }
+    .btn-icon {
+      width: 30px; height: 30px; padding: 0;
+      display: flex; align-items: center; justify-content: center;
+      border-radius: 6px; border: none; cursor: pointer;
+      background: transparent; color: #9ca3af; font-size: 16px;
+    }
+    .btn-icon:hover { background: #1f2937; color: #fff; }
+
+    /* Search */
+    .search-bar {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      margin-bottom: 12px;
+    }
+    .search-bar input {
+      flex: 1;
+      padding: 8px 12px;
+      background: #1a2736;
+      border: 1px solid #2d3f52;
+      border-radius: 6px;
+      color: #e0e0e0;
+      font-size: 13px;
+      outline: none;
+    }
+    .search-bar input:focus { border-color: #2563eb; }
+    .search-bar input::placeholder { color: #6b7280; }
+    .filter-btn {
+      padding: 6px 12px;
+      border: 1px solid #2d3f52;
+      border-radius: 6px;
+      background: transparent;
+      color: #9ca3af;
+      font-size: 12px;
+      cursor: pointer;
+      transition: all 0.15s;
+      white-space: nowrap;
+    }
+    .filter-btn:hover { background: #1f2937; color: #fff; }
+    .filter-btn.active { background: #1e3a5f; color: #7eb8f0; border-color: #2563eb; }
+
+    /* Table */
+    .table-container {
+      background: #141f2b;
+      border-radius: 8px;
+      border: 1px solid #1e2d3d;
+      overflow: hidden;
+    }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+    }
+    thead th {
+      padding: 10px 12px;
+      text-align: left;
+      font-size: 11px;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      color: #6b7f94;
+      background: #0f1923;
+      border-bottom: 1px solid #1e2d3d;
+      cursor: pointer;
+      white-space: nowrap;
+    }
+    thead th:hover { color: #a0b4c8; }
+    thead th .sort-arrow { margin-left: 4px; font-size: 10px; }
+    tbody tr {
+      border-bottom: 1px solid #1a2736;
+      transition: background 0.1s;
+    }
+    tbody tr:hover { background: #1a2736; }
+    tbody tr.pinned { background: #1a2a1a; }
+    tbody tr.pinned:hover { background: #1f3320; }
+    tbody td {
+      padding: 8px 12px;
+      font-size: 13px;
+      white-space: nowrap;
+    }
+
+    /* Port cell */
+    .port-cell {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+    .port-number {
+      font-weight: 700;
+      font-size: 14px;
+      color: #7eb8f0;
+      font-family: 'Cascadia Code', 'Consolas', monospace;
+    }
+    .port-hint {
+      font-size: 11px;
+      color: #6b7f94;
+      font-weight: 400;
+    }
+    .pin-star {
+      cursor: pointer;
+      font-size: 14px;
+      color: #4b5563;
+      transition: color 0.15s;
+    }
+    .pin-star:hover { color: #fbbf24; }
+    .pin-star.pinned { color: #fbbf24; }
+
+    /* State badge */
+    .state-badge {
+      display: inline-block;
+      padding: 2px 8px;
+      border-radius: 10px;
+      font-size: 11px;
+      font-weight: 600;
+    }
+    .state-listen { background: #064e3b; color: #6ee7b7; }
+    .state-established { background: #1e3a5f; color: #7eb8f0; }
+
+    /* Process */
+    .process-name {
+      font-weight: 500;
+      color: #d1d5db;
+    }
+    .process-pid {
+      font-size: 11px;
+      color: #6b7f94;
+      font-family: monospace;
+    }
+
+    /* Note */
+    .note-cell {
+      max-width: 160px;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .note-text {
+      color: #9ca3af;
+      font-size: 12px;
+      font-style: italic;
+      cursor: pointer;
+    }
+    .note-text:hover { color: #d1d5db; }
+    .note-add {
+      color: #4b5563;
+      cursor: pointer;
+      font-size: 12px;
+    }
+    .note-add:hover { color: #9ca3af; }
+
+    /* Actions */
+    .actions-cell {
+      display: flex;
+      gap: 4px;
+    }
+
+    /* Settings panel */
+    .settings-overlay {
+      display: none;
+      position: fixed;
+      inset: 0;
+      background: rgba(0,0,0,0.5);
+      z-index: 100;
+    }
+    .settings-overlay.open { display: flex; align-items: center; justify-content: center; }
+    .settings-panel {
+      background: #141f2b;
+      border: 1px solid #1e2d3d;
+      border-radius: 10px;
+      padding: 24px;
+      width: 400px;
+      max-width: 90vw;
+    }
+    .settings-panel h2 {
+      font-size: 16px;
+      margin-bottom: 16px;
+      color: #fff;
+    }
+    .setting-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 8px 0;
+    }
+    .setting-label { font-size: 13px; color: #d1d5db; }
+    .setting-row input[type="number"] {
+      width: 60px;
+      padding: 4px 8px;
+      background: #1a2736;
+      border: 1px solid #2d3f52;
+      border-radius: 4px;
+      color: #e0e0e0;
+      font-size: 13px;
+      text-align: center;
+    }
+    .setting-row input[type="number"]:focus { border-color: #2563eb; outline: none; }
+
+    /* Toggle switch */
+    .toggle {
+      position: relative;
+      width: 40px; height: 22px;
+      cursor: pointer;
+    }
+    .toggle input { opacity: 0; width: 0; height: 0; }
+    .toggle .slider {
+      position: absolute; inset: 0;
+      background: #374151; border-radius: 22px;
+      transition: 0.2s;
+    }
+    .toggle .slider:before {
+      content: '';
+      position: absolute;
+      height: 16px; width: 16px;
+      left: 3px; bottom: 3px;
+      background: #9ca3af;
+      border-radius: 50%;
+      transition: 0.2s;
+    }
+    .toggle input:checked + .slider { background: #1e3a5f; }
+    .toggle input:checked + .slider:before {
+      transform: translateX(18px);
+      background: #7eb8f0;
+    }
+
+    /* Empty state */
+    .empty-state {
+      text-align: center;
+      padding: 60px 20px;
+      color: #6b7f94;
+    }
+    .empty-state h3 { font-size: 16px; margin-bottom: 8px; color: #9ca3af; }
+
+    /* Status bar */
+    .status-bar {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-top: 8px;
+      font-size: 11px;
+      color: #4b5563;
+      padding: 0 4px;
+    }
+
+    /* Note edit modal */
+    .note-modal {
+      display: none;
+      position: fixed;
+      inset: 0;
+      background: rgba(0,0,0,0.5);
+      z-index: 200;
+    }
+    .note-modal.open { display: flex; align-items: center; justify-content: center; }
+    .note-modal-inner {
+      background: #141f2b;
+      border: 1px solid #1e2d3d;
+      border-radius: 10px;
+      padding: 20px;
+      width: 360px;
+    }
+    .note-modal-inner h3 { font-size: 14px; margin-bottom: 12px; color: #fff; }
+    .note-modal-inner input {
+      width: 100%;
+      padding: 8px 10px;
+      background: #1a2736;
+      border: 1px solid #2d3f52;
+      border-radius: 6px;
+      color: #e0e0e0;
+      font-size: 13px;
+      outline: none;
+      margin-bottom: 12px;
+    }
+    .note-modal-inner input:focus { border-color: #2563eb; }
+    .note-modal-actions { display: flex; gap: 8px; justify-content: flex-end; }
+
+    /* Toast */
+    .toast {
+      position: fixed;
+      bottom: 20px;
+      right: 20px;
+      background: #1e3a5f;
+      color: #7eb8f0;
+      padding: 10px 18px;
+      border-radius: 8px;
+      font-size: 13px;
+      z-index: 999;
+      opacity: 0;
+      transform: translateY(10px);
+      transition: all 0.2s;
+      pointer-events: none;
+    }
+    .toast.show { opacity: 1; transform: translateY(0); }
+
+    /* Branding */
+    .branding {
+      text-align: center;
+      margin-top: 10px;
+      font-size: 11px;
+      color: #374151;
+    }
+    .branding a { color: #4b5563; text-decoration: none; }
+    .branding a:hover { color: #6b7f94; }
+  </style>
+</head>
+<body>
+
+  <!-- Header -->
+  <div class="header">
+    <div class="header-left">
+      <h1>Port Pilot</h1>
+      <span class="port-count" id="portCount">0 ports</span>
+    </div>
+    <div class="header-right">
+      <button class="btn btn-primary" onclick="refreshPorts()" id="refreshBtn">Refresh</button>
+      <button class="btn-icon" onclick="openSettings()" title="Settings">&#9881;</button>
+    </div>
+  </div>
+
+  <!-- Search & Filters -->
+  <div class="search-bar">
+    <input type="text" id="searchInput" placeholder="Search ports, processes, notes..." oninput="filterTable()">
+    <button class="filter-btn active" data-filter="listening" onclick="setFilter('listening')">Listening</button>
+    <button class="filter-btn" data-filter="all" onclick="setFilter('all')">All</button>
+    <button class="filter-btn" data-filter="pinned" onclick="setFilter('pinned')">Pinned</button>
+    <button class="filter-btn" data-filter="dev" onclick="setFilter('dev')">Dev</button>
+  </div>
+
+  <!-- Port Table -->
+  <div class="table-container">
+    <table>
+      <thead>
+        <tr>
+          <th onclick="sortBy('port')">Port <span class="sort-arrow" id="sort-port"></span></th>
+          <th onclick="sortBy('state')">State <span class="sort-arrow" id="sort-state"></span></th>
+          <th onclick="sortBy('processName')">Process <span class="sort-arrow" id="sort-processName"></span></th>
+          <th onclick="sortBy('pid')">PID <span class="sort-arrow" id="sort-pid"></span></th>
+          <th>Address</th>
+          <th>Note</th>
+          <th>Actions</th>
+        </tr>
+      </thead>
+      <tbody id="portTable"></tbody>
+    </table>
+    <div class="empty-state" id="emptyState" style="display:none;">
+      <h3>No ports found</h3>
+      <p>No listening connections match your filters.</p>
+    </div>
+  </div>
+
+  <!-- Status Bar -->
+  <div class="status-bar">
+    <span id="lastRefresh">Last refresh: --</span>
+    <span id="autoRefreshStatus">Auto-refresh: 3s</span>
+  </div>
+
+  <!-- Branding -->
+  <div class="branding">
+    Powered by <a href="https://cloudnimbusllc.com" target="_blank">Cloud Nimbus LLC</a>
+  </div>
+
+  <!-- Settings Overlay -->
+  <div class="settings-overlay" id="settingsOverlay" onclick="closeSettingsOutside(event)">
+    <div class="settings-panel">
+      <h2>Settings</h2>
+      <div class="setting-row">
+        <span class="setting-label">Auto-refresh interval (seconds)</span>
+        <input type="number" id="settRefresh" min="1" max="60" value="3">
+      </div>
+      <div class="setting-row">
+        <span class="setting-label">Show established connections</span>
+        <label class="toggle">
+          <input type="checkbox" id="settEstablished">
+          <span class="slider"></span>
+        </label>
+      </div>
+      <div class="setting-row">
+        <span class="setting-label">Start minimized to tray</span>
+        <label class="toggle">
+          <input type="checkbox" id="settMinimized">
+          <span class="slider"></span>
+        </label>
+      </div>
+      <div style="display:flex; gap:8px; justify-content:flex-end; margin-top:16px;">
+        <button class="btn btn-ghost" onclick="closeSettings()">Cancel</button>
+        <button class="btn btn-primary" onclick="saveSettings()">Save</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Note Edit Modal -->
+  <div class="note-modal" id="noteModal">
+    <div class="note-modal-inner">
+      <h3 id="noteModalTitle">Edit Note</h3>
+      <input type="text" id="noteInput" placeholder="e.g. My API server" onkeydown="if(event.key==='Enter')saveNote()">
+      <div class="note-modal-actions">
+        <button class="btn btn-ghost" onclick="closeNoteModal()">Cancel</button>
+        <button class="btn btn-danger" onclick="deleteNote()" id="noteDeleteBtn" style="display:none">Delete</button>
+        <button class="btn btn-primary" onclick="saveNote()">Save</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Toast -->
+  <div class="toast" id="toast"></div>
+
+<script>
+  // --- State ---
+  let allPorts = [];
+  let pinnedPorts = [];
+  let currentFilter = 'listening';
+  let currentSort = { field: 'port', asc: true };
+  let refreshTimer = null;
+  let noteEditing = { port: null, pid: null };
+
+  const DEV_PORTS = new Set([3000,3001,4200,5000,5173,5174,5500,8000,8080,8888,9229,4000,19006]);
+
+  // --- Init ---
+  async function init() {
+    const settings = await window.api.getSettings();
+    pinnedPorts = settings.pinnedPorts || [];
+    startAutoRefresh(settings.refreshInterval || 3);
+    await refreshPorts();
+  }
+
+  // --- Refresh ---
+  async function refreshPorts() {
+    const btn = document.getElementById('refreshBtn');
+    btn.textContent = '...';
+    try {
+      allPorts = await window.api.getPorts();
+      renderTable();
+      document.getElementById('lastRefresh').textContent = 'Last refresh: ' + new Date().toLocaleTimeString();
+    } catch (e) {
+      console.error(e);
+    }
+    btn.textContent = 'Refresh';
+  }
+
+  function startAutoRefresh(seconds) {
+    if (refreshTimer) clearInterval(refreshTimer);
+    refreshTimer = setInterval(refreshPorts, seconds * 1000);
+    document.getElementById('autoRefreshStatus').textContent = `Auto-refresh: ${seconds}s`;
+  }
+
+  // --- Filtering ---
+  function setFilter(f) {
+    currentFilter = f;
+    document.querySelectorAll('.filter-btn').forEach(b => b.classList.toggle('active', b.dataset.filter === f));
+    renderTable();
+  }
+
+  function filterTable() {
+    renderTable();
+  }
+
+  function getFilteredPorts() {
+    const search = document.getElementById('searchInput').value.toLowerCase();
+    let ports = [...allPorts];
+
+    // Deduplicate: for listening ports, group by port+pid (ignore multiple addresses)
+    if (currentFilter !== 'all') {
+      const seen = new Set();
+      ports = ports.filter(p => {
+        if (p.state !== 'Listen') return currentFilter === 'all';
+        const key = `${p.port}:${p.pid}`;
+        if (seen.has(key)) return false;
+        seen.add(key);
+        return true;
+      });
+    }
+
+    // Apply filter
+    if (currentFilter === 'listening') {
+      ports = ports.filter(p => p.state === 'Listen');
+    } else if (currentFilter === 'pinned') {
+      ports = ports.filter(p => pinnedPorts.includes(p.port));
+    } else if (currentFilter === 'dev') {
+      ports = ports.filter(p => DEV_PORTS.has(p.port) || p.hint);
+    }
+
+    // Search
+    if (search) {
+      ports = ports.filter(p =>
+        String(p.port).includes(search) ||
+        p.processName.toLowerCase().includes(search) ||
+        String(p.pid).includes(search) ||
+        (p.hint || '').toLowerCase().includes(search) ||
+        p.localAddress.includes(search)
+      );
+    }
+
+    // Sort
+    ports.sort((a, b) => {
+      // Pinned first
+      const aPinned = pinnedPorts.includes(a.port) ? 0 : 1;
+      const bPinned = pinnedPorts.includes(b.port) ? 0 : 1;
+      if (aPinned !== bPinned) return aPinned - bPinned;
+
+      let va = a[currentSort.field];
+      let vb = b[currentSort.field];
+      if (typeof va === 'string') { va = va.toLowerCase(); vb = vb.toLowerCase(); }
+      if (va < vb) return currentSort.asc ? -1 : 1;
+      if (va > vb) return currentSort.asc ? 1 : -1;
+      return 0;
+    });
+
+    return ports;
+  }
+
+  // --- Sorting ---
+  function sortBy(field) {
+    if (currentSort.field === field) {
+      currentSort.asc = !currentSort.asc;
+    } else {
+      currentSort = { field, asc: true };
+    }
+    // Update arrows
+    document.querySelectorAll('.sort-arrow').forEach(el => el.textContent = '');
+    const arrow = document.getElementById(`sort-${field}`);
+    if (arrow) arrow.textContent = currentSort.asc ? '\u25B2' : '\u25BC';
+    renderTable();
+  }
+
+  // --- Render ---
+  function renderTable() {
+    const ports = getFilteredPorts();
+    const tbody = document.getElementById('portTable');
+    const empty = document.getElementById('emptyState');
+
+    document.getElementById('portCount').textContent =
+      `${ports.length} port${ports.length !== 1 ? 's' : ''}`;
+
+    if (ports.length === 0) {
+      tbody.innerHTML = '';
+      empty.style.display = '';
+      return;
+    }
+    empty.style.display = 'none';
+
+    tbody.innerHTML = ports.map(p => {
+      const isPinned = pinnedPorts.includes(p.port);
+      const stateClass = p.state === 'Listen' ? 'state-listen' : 'state-established';
+      const noteKey = `${p.port}:${p.pid}`;
+
+      return `<tr class="${isPinned ? 'pinned' : ''}">
+        <td>
+          <div class="port-cell">
+            <span class="pin-star ${isPinned ? 'pinned' : ''}" onclick="togglePin(${p.port})" title="Pin port">&#9733;</span>
+            <span class="port-number">${p.port}</span>
+            ${p.hint ? `<span class="port-hint">${p.hint}</span>` : ''}
+          </div>
+        </td>
+        <td><span class="state-badge ${stateClass}">${p.state}</span></td>
+        <td><span class="process-name">${escHtml(p.processName)}</span></td>
+        <td><span class="process-pid">${p.pid}</span></td>
+        <td style="font-family:monospace;font-size:12px;color:#6b7f94">${p.localAddress}</td>
+        <td class="note-cell">
+          <span class="note-text note-add" onclick="openNoteModal(${p.port}, ${p.pid})" title="Add/edit note">+ note</span>
+        </td>
+        <td>
+          <div class="actions-cell">
+            <button class="btn-icon" onclick="openBrowser(${p.port})" title="Open in browser">&#127760;</button>
+            <button class="btn-icon" onclick="copyPort(${p.port})" title="Copy localhost URL">&#128203;</button>
+            <button class="btn-icon" style="color:#f87171" onclick="confirmKill(${p.pid}, '${escAttr(p.processName)}', ${p.port})" title="Kill process">&#10005;</button>
+          </div>
+        </td>
+      </tr>`;
+    }).join('');
+  }
+
+  function escHtml(s) { return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+  function escAttr(s) { return s.replace(/'/g, "\\'").replace(/"/g, '&quot;'); }
+
+  // --- Actions ---
+  async function togglePin(port) {
+    const result = await window.api.togglePin(port);
+    pinnedPorts = result.pinned;
+    renderTable();
+  }
+
+  async function openBrowser(port) {
+    await window.api.openBrowser(port);
+    showToast(`Opened localhost:${port}`);
+  }
+
+  async function copyPort(port) {
+    await window.api.copyToClipboard(`http://localhost:${port}`);
+    showToast(`Copied http://localhost:${port}`);
+  }
+
+  async function confirmKill(pid, name, port) {
+    if (confirm(`Kill ${name} (PID ${pid}) on port ${port}?`)) {
+      const result = await window.api.killProcess(pid);
+      if (result.status === 'ok') {
+        showToast(`Killed ${name} (PID ${pid})`);
+        setTimeout(refreshPorts, 500);
+      } else {
+        showToast(`Failed: ${result.message}`);
+      }
+    }
+  }
+
+  // --- Notes ---
+  function openNoteModal(port, pid) {
+    noteEditing = { port, pid };
+    document.getElementById('noteModalTitle').textContent = `Note for port ${port}`;
+    document.getElementById('noteInput').value = '';
+    document.getElementById('noteDeleteBtn').style.display = 'none';
+    document.getElementById('noteModal').classList.add('open');
+    setTimeout(() => document.getElementById('noteInput').focus(), 50);
+  }
+
+  async function saveNote() {
+    const text = document.getElementById('noteInput').value.trim();
+    await window.api.setNote(noteEditing.port, noteEditing.pid, text);
+    closeNoteModal();
+    showToast(text ? 'Note saved' : 'Note removed');
+  }
+
+  function deleteNote() {
+    document.getElementById('noteInput').value = '';
+    saveNote();
+  }
+
+  function closeNoteModal() {
+    document.getElementById('noteModal').classList.remove('open');
+  }
+
+  // --- Settings ---
+  async function openSettings() {
+    const s = await window.api.getSettings();
+    document.getElementById('settRefresh').value = s.refreshInterval || 3;
+    document.getElementById('settEstablished').checked = !!s.showEstablished;
+    document.getElementById('settMinimized').checked = !!s.startMinimized;
+    document.getElementById('settingsOverlay').classList.add('open');
+  }
+
+  async function saveSettings() {
+    const settings = {
+      refreshInterval: parseInt(document.getElementById('settRefresh').value) || 3,
+      showEstablished: document.getElementById('settEstablished').checked,
+      startMinimized: document.getElementById('settMinimized').checked,
+      pinnedPorts,
+    };
+    await window.api.saveSettings(settings);
+    startAutoRefresh(settings.refreshInterval);
+    closeSettings();
+    showToast('Settings saved');
+    refreshPorts();
+  }
+
+  function closeSettings() {
+    document.getElementById('settingsOverlay').classList.remove('open');
+  }
+
+  function closeSettingsOutside(e) {
+    if (e.target === document.getElementById('settingsOverlay')) closeSettings();
+  }
+
+  // --- Toast ---
+  function showToast(msg) {
+    const t = document.getElementById('toast');
+    t.textContent = msg;
+    t.classList.add('show');
+    setTimeout(() => t.classList.remove('show'), 2000);
+  }
+
+  // --- Start ---
+  init();
+</script>
+</body>
+</html>
