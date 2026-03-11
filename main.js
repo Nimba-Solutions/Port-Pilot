@@ -1,7 +1,7 @@
 /**
  * @name         Port Pilot
  * @license      BSL 1.1 — See LICENSE.md
- * @description  Electron main process — visual localhost port manager for Windows.
+ * @description  Electron main process — visual localhost port manager (Windows, macOS, Linux).
  * @author       Cloud Nimbus LLC
  */
 const { app, BrowserWindow, ipcMain, Tray, Menu, nativeImage } = require('electron');
@@ -20,6 +20,8 @@ const store = new Store({
     notes: {},  // { "port:pid": "My API server" }
   },
 });
+
+const platform = process.platform; // 'win32', 'darwin', 'linux'
 
 let mainWindow = null;
 let tray = null;
@@ -91,12 +93,21 @@ function createTray() {
   tray.on('double-click', () => createWindow());
 }
 
-// --- PowerShell ---
+// --- Shell helpers ---
 
 function runPowerShell(command) {
   return new Promise((resolve, reject) => {
     const psCmd = `powershell -NoProfile -ExecutionPolicy Bypass -Command "${command.replace(/"/g, '\\"')}"`;
     exec(psCmd, { windowsHide: true, maxBuffer: 10 * 1024 * 1024 }, (err, stdout, stderr) => {
+      if (err) reject(new Error(stderr || err.message));
+      else resolve(stdout.trim());
+    });
+  });
+}
+
+function runShell(command) {
+  return new Promise((resolve, reject) => {
+    exec(command, { shell: '/bin/bash', maxBuffer: 10 * 1024 * 1024 }, (err, stdout, stderr) => {
       if (err) reject(new Error(stderr || err.message));
       else resolve(stdout.trim());
     });
@@ -135,38 +146,212 @@ const KNOWN_PORTS = {
 };
 
 async function getListeningPorts(includeEstablished) {
-  const states = includeEstablished ? "'Listen','Established'" : "'Listen'";
-  const cmd = `Get-NetTCPConnection -State ${states} -ErrorAction SilentlyContinue | Select-Object LocalAddress, LocalPort, RemoteAddress, RemotePort, State, OwningProcess | ConvertTo-Json -Compress`;
-
   try {
-    const raw = await runPowerShell(cmd);
-    if (!raw) return [];
-    const parsed = JSON.parse(raw);
-    const connections = Array.isArray(parsed) ? parsed : [parsed];
-
-    // Get process info for all unique PIDs
-    const pids = [...new Set(connections.map(c => c.OwningProcess))];
-    const processMap = await getProcessInfo(pids);
-
-    return connections.map(c => ({
-      localAddress: c.LocalAddress,
-      port: c.LocalPort,
-      remoteAddress: c.RemoteAddress,
-      remotePort: c.RemotePort,
-      state: c.State === 2 ? 'Listen' : c.State === 5 ? 'Established' : String(c.State),
-      pid: c.OwningProcess,
-      processName: processMap[c.OwningProcess]?.name || 'Unknown',
-      processPath: processMap[c.OwningProcess]?.path || '',
-      hint: KNOWN_PORTS[c.LocalPort] || '',
-    }));
+    if (platform === 'win32') {
+      return await getListeningPortsWindows(includeEstablished);
+    } else if (platform === 'darwin') {
+      return await getListeningPortsMac(includeEstablished);
+    } else {
+      return await getListeningPortsLinux(includeEstablished);
+    }
   } catch (e) {
     console.error('Port scan error:', e.message);
     return [];
   }
 }
 
+async function getListeningPortsWindows(includeEstablished) {
+  const states = includeEstablished ? "'Listen','Established'" : "'Listen'";
+  const cmd = `Get-NetTCPConnection -State ${states} -ErrorAction SilentlyContinue | Select-Object LocalAddress, LocalPort, RemoteAddress, RemotePort, State, OwningProcess | ConvertTo-Json -Compress`;
+
+  const raw = await runPowerShell(cmd);
+  if (!raw) return [];
+  const parsed = JSON.parse(raw);
+  const connections = Array.isArray(parsed) ? parsed : [parsed];
+
+  const pids = [...new Set(connections.map(c => c.OwningProcess))];
+  const processMap = await getProcessInfo(pids);
+
+  return connections.map(c => ({
+    localAddress: c.LocalAddress,
+    port: c.LocalPort,
+    remoteAddress: c.RemoteAddress,
+    remotePort: c.RemotePort,
+    state: c.State === 2 ? 'Listen' : c.State === 5 ? 'Established' : String(c.State),
+    pid: c.OwningProcess,
+    processName: processMap[c.OwningProcess]?.name || 'Unknown',
+    processPath: processMap[c.OwningProcess]?.path || '',
+    hint: KNOWN_PORTS[c.LocalPort] || '',
+  }));
+}
+
+async function getListeningPortsMac(includeEstablished) {
+  const stateFilter = includeEstablished ? 'LISTEN,ESTABLISHED' : 'LISTEN';
+  const cmd = `lsof -i -P -n -sTCP:${stateFilter}`;
+
+  const raw = await runShell(cmd);
+  if (!raw) return [];
+
+  const lines = raw.split('\n');
+  // Skip the header line
+  const dataLines = lines.slice(1);
+  const connections = [];
+
+  for (const line of dataLines) {
+    const parts = line.trim().split(/\s+/);
+    if (parts.length < 9) continue;
+
+    const processName = parts[0];
+    const pid = parseInt(parts[1], 10);
+    if (isNaN(pid)) continue;
+
+    const nameCol = parts[8];
+    // NAME can be like *:3000, localhost:8080, 127.0.0.1:3000, or [::1]:3000
+    // For connections: 127.0.0.1:3000->127.0.0.1:54321
+    let localAddress = '*';
+    let localPort = 0;
+    let remoteAddress = '';
+    let remotePort = 0;
+    let state = 'Listen';
+
+    const arrowIdx = nameCol.indexOf('->');
+    const localPart = arrowIdx >= 0 ? nameCol.substring(0, arrowIdx) : nameCol;
+    const remotePart = arrowIdx >= 0 ? nameCol.substring(arrowIdx + 2) : '';
+
+    const lastColon = localPart.lastIndexOf(':');
+    if (lastColon >= 0) {
+      localAddress = localPart.substring(0, lastColon) || '*';
+      localPort = parseInt(localPart.substring(lastColon + 1), 10);
+    }
+
+    if (remotePart) {
+      state = 'Established';
+      const rColon = remotePart.lastIndexOf(':');
+      if (rColon >= 0) {
+        remoteAddress = remotePart.substring(0, rColon);
+        remotePort = parseInt(remotePart.substring(rColon + 1), 10);
+      }
+    }
+
+    if (isNaN(localPort) || localPort === 0) continue;
+
+    connections.push({
+      localAddress,
+      port: localPort,
+      remoteAddress,
+      remotePort: remotePort || 0,
+      state,
+      pid,
+      processName,
+      processPath: '',
+      hint: KNOWN_PORTS[localPort] || '',
+    });
+  }
+
+  // Enrich with full process paths
+  const pids = [...new Set(connections.map(c => c.pid))];
+  const processMap = await getProcessInfo(pids);
+  for (const c of connections) {
+    if (processMap[c.pid]) {
+      c.processPath = processMap[c.pid].path || '';
+      // Keep lsof's process name as it's already good, but use ps if available
+      if (processMap[c.pid].name) c.processName = processMap[c.pid].name;
+    }
+  }
+
+  return connections;
+}
+
+async function getListeningPortsLinux(includeEstablished) {
+  // ss -tlnp for listening only, ss -tnp for all states
+  const cmd = includeEstablished ? 'ss -tnp' : 'ss -tlnp';
+
+  const raw = await runShell(cmd);
+  if (!raw) return [];
+
+  const lines = raw.split('\n');
+  // Skip the header line
+  const dataLines = lines.slice(1);
+  const connections = [];
+
+  for (const line of dataLines) {
+    const parts = line.trim().split(/\s+/);
+    if (parts.length < 5) continue;
+
+    const stateStr = parts[0];
+    // Columns: State, Recv-Q, Send-Q, Local Address:Port, Peer Address:Port, [Process]
+    const localAddr = parts[3];
+    const peerAddr = parts[4];
+    const processCol = parts.slice(5).join(' ');
+
+    // Parse local address:port — last colon separates port
+    const lastColon = localAddr.lastIndexOf(':');
+    if (lastColon < 0) continue;
+    const localAddress = localAddr.substring(0, lastColon) || '*';
+    const localPort = parseInt(localAddr.substring(lastColon + 1), 10);
+    if (isNaN(localPort) || localPort === 0) continue;
+
+    // Parse remote address:port
+    let remoteAddress = '';
+    let remotePort = 0;
+    const rColon = peerAddr.lastIndexOf(':');
+    if (rColon >= 0) {
+      remoteAddress = peerAddr.substring(0, rColon);
+      remotePort = parseInt(peerAddr.substring(rColon + 1), 10);
+      if (isNaN(remotePort)) remotePort = 0;
+    }
+
+    // Parse PID from process column: users:(("node",pid=1234,fd=3))
+    let pid = 0;
+    let processName = 'Unknown';
+    const pidMatch = processCol.match(/pid=(\d+)/);
+    if (pidMatch) {
+      pid = parseInt(pidMatch[1], 10);
+    }
+    const nameMatch = processCol.match(/\(\("([^"]+)"/);
+    if (nameMatch) {
+      processName = nameMatch[1];
+    }
+
+    const state = stateStr === 'LISTEN' ? 'Listen' : stateStr === 'ESTAB' ? 'Established' : stateStr;
+
+    connections.push({
+      localAddress,
+      port: localPort,
+      remoteAddress,
+      remotePort,
+      state,
+      pid,
+      processName,
+      processPath: '',
+      hint: KNOWN_PORTS[localPort] || '',
+    });
+  }
+
+  // Enrich with full process paths
+  const pids = [...new Set(connections.map(c => c.pid).filter(p => p > 0))];
+  const processMap = await getProcessInfo(pids);
+  for (const c of connections) {
+    if (processMap[c.pid]) {
+      c.processPath = processMap[c.pid].path || '';
+      if (processMap[c.pid].name) c.processName = processMap[c.pid].name;
+    }
+  }
+
+  return connections;
+}
+
 async function getProcessInfo(pids) {
   if (pids.length === 0) return {};
+
+  if (platform === 'win32') {
+    return await getProcessInfoWindows(pids);
+  } else {
+    return await getProcessInfoUnix(pids);
+  }
+}
+
+async function getProcessInfoWindows(pids) {
   const pidFilter = pids.join(',');
   const cmd = `Get-Process -Id ${pidFilter} -ErrorAction SilentlyContinue | Select-Object Id, ProcessName, Path | ConvertTo-Json -Compress`;
 
@@ -185,18 +370,68 @@ async function getProcessInfo(pids) {
   }
 }
 
-async function killProcess(pid) {
+async function getProcessInfoUnix(pids) {
+  const map = {};
+  // Sanitize PIDs — only allow integers
+  const safePids = pids.filter(p => Number.isInteger(p) && p > 0);
+  if (safePids.length === 0) return map;
+
   try {
-    await runPowerShell(`Stop-Process -Id ${pid} -Force -ErrorAction Stop`);
-    return { status: 'ok', pid };
+    const pidArgs = safePids.join(',');
+    const raw = await runShell(`ps -p ${pidArgs} -o pid=,comm=,args=`);
+    if (!raw) return map;
+
+    for (const line of raw.split('\n')) {
+      const trimmed = line.trim();
+      if (!trimmed) continue;
+      // Format: PID COMM ARGS...
+      const parts = trimmed.split(/\s+/);
+      if (parts.length < 2) continue;
+      const pid = parseInt(parts[0], 10);
+      if (isNaN(pid)) continue;
+      const comm = parts[1];
+      const args = parts.slice(2).join(' ');
+      map[pid] = { name: comm, path: args || comm };
+    }
+    return map;
   } catch (e) {
-    return { status: 'error', pid, message: e.message };
+    return map;
+  }
+}
+
+async function killProcess(pid) {
+  // Sanitize PID — must be a positive integer to prevent injection
+  const safePid = parseInt(pid, 10);
+  if (isNaN(safePid) || safePid <= 0) {
+    return { status: 'error', pid, message: 'Invalid PID' };
+  }
+
+  try {
+    if (platform === 'win32') {
+      await runPowerShell(`Stop-Process -Id ${safePid} -Force -ErrorAction Stop`);
+    } else {
+      await runShell(`kill -9 ${safePid}`);
+    }
+    return { status: 'ok', pid: safePid };
+  } catch (e) {
+    return { status: 'error', pid: safePid, message: e.message };
   }
 }
 
 async function openInBrowser(port) {
   try {
-    exec(`start http://localhost:${port}`, { shell: true });
+    const safePort = parseInt(port, 10);
+    if (isNaN(safePort) || safePort <= 0 || safePort > 65535) {
+      return { status: 'error', message: 'Invalid port number' };
+    }
+
+    if (platform === 'win32') {
+      exec(`start http://localhost:${safePort}`, { shell: true });
+    } else if (platform === 'darwin') {
+      exec(`open http://localhost:${safePort}`);
+    } else {
+      exec(`xdg-open http://localhost:${safePort}`);
+    }
     return { status: 'ok' };
   } catch (e) {
     return { status: 'error', message: e.message };
