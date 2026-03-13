@@ -7,6 +7,7 @@
 const { app, BrowserWindow, ipcMain, Tray, Menu, nativeImage } = require('electron');
 const path = require('path');
 const { exec } = require('child_process');
+const guard = require('./process-guard');
 const Store = require('electron-store');
 
 const store = new Store({
@@ -96,22 +97,12 @@ function createTray() {
 // --- Shell helpers ---
 
 function runPowerShell(command) {
-  return new Promise((resolve, reject) => {
-    const psCmd = `powershell -NoProfile -ExecutionPolicy Bypass -Command "${command.replace(/"/g, '\\"')}"`;
-    exec(psCmd, { windowsHide: true, maxBuffer: 10 * 1024 * 1024 }, (err, stdout, stderr) => {
-      if (err) reject(new Error(stderr || err.message));
-      else resolve(stdout.trim());
-    });
-  });
+  const psCmd = `powershell -NoProfile -ExecutionPolicy Bypass -Command "${command.replace(/"/g, '\\"')}"`;
+  return guard.execPromise(psCmd).then(s => (s || '').trim());
 }
 
 function runShell(command) {
-  return new Promise((resolve, reject) => {
-    exec(command, { shell: '/bin/bash', maxBuffer: 10 * 1024 * 1024 }, (err, stdout, stderr) => {
-      if (err) reject(new Error(stderr || err.message));
-      else resolve(stdout.trim());
-    });
-  });
+  return guard.execPromise(command).then(s => (s || '').trim());
 }
 
 // --- Port scanning ---
@@ -426,11 +417,11 @@ async function openInBrowser(port) {
     }
 
     if (platform === 'win32') {
-      exec(`start http://localhost:${safePort}`, { shell: true });
+      guard.exec(`start http://localhost:${safePort}`, { shell: true });
     } else if (platform === 'darwin') {
-      exec(`open http://localhost:${safePort}`);
+      guard.exec(`open http://localhost:${safePort}`);
     } else {
-      exec(`xdg-open http://localhost:${safePort}`);
+      guard.exec(`xdg-open http://localhost:${safePort}`);
     }
     return { status: 'ok' };
   } catch (e) {
@@ -495,9 +486,27 @@ ipcMain.handle('copy-to-clipboard', (_, text) => {
   return { status: 'ok' };
 });
 
+// --- Single instance lock ---
+
+const gotLock = app.requestSingleInstanceLock();
+if (!gotLock) {
+  app.quit();
+} else {
+  app.on('second-instance', () => {
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.show();
+      mainWindow.focus();
+    } else {
+      createWindow();
+    }
+  });
+}
+
 // --- App lifecycle ---
 
+if (gotLock) {
 app.whenReady().then(() => {
+  guard.init(app);
   createTray();
 
   const settings = store.get('settings');
@@ -505,7 +514,8 @@ app.whenReady().then(() => {
     createWindow();
   }
 });
+}
 
 app.on('window-all-closed', () => { /* keep running in tray */ });
-app.on('activate', () => createWindow());
+app.on('activate', () => { if (gotLock) createWindow(); });
 app.on('before-quit', () => { app.isQuitting = true; });
